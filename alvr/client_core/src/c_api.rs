@@ -336,9 +336,11 @@ pub extern "C" fn alvr_poll_event(out_event: *mut AlvrEvent) -> bool {
                     amplitude,
                 },
                 ClientCoreEvent::DecoderConfig { codec, config_nal } => {
-                    NAL_QUEUE
-                        .lock()
-                        .push_back((0, [ViewParams::default(); 2], config_nal));
+                    if config_nal.len() > 0 {
+                        NAL_QUEUE
+                            .lock()
+                            .push_back((0, [ViewParams::default(); 2], config_nal));
+                    }
 
                     AlvrEvent::DecoderConfig {
                         codec: match codec {
@@ -353,9 +355,11 @@ pub extern "C" fn alvr_poll_event(out_event: *mut AlvrEvent) -> bool {
                     view_params,
                     nal,
                 } => {
-                    NAL_QUEUE
-                        .lock()
-                        .push_back((timestamp.as_nanos() as _, view_params, nal));
+                    if nal.len() > 0 {
+                        NAL_QUEUE
+                            .lock()
+                            .push_back((timestamp.as_nanos() as _, view_params, nal));
+                    }
 
                     AlvrEvent::FrameReady
                 }
