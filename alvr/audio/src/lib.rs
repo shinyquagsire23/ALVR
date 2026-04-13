@@ -12,7 +12,7 @@ use alvr_common::{
     info,
     once_cell::sync::Lazy,
     parking_lot::Mutex,
-    ConnectionError, ToAny,
+    warn, ConnectionError, ToAny,
 };
 use alvr_session::{AudioBufferingConfig, CustomAudioDeviceConfig, MicrophoneDevicesConfig};
 use alvr_sockets::{StreamReceiver, StreamSender};
@@ -20,12 +20,14 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     BufferSize, Device, Host, Sample, SampleFormat, StreamConfig,
 };
-use rodio::{OutputStream, Source};
 use std::{
     collections::{HashMap, VecDeque},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 static VIRTUAL_MICROPHONE_PAIRS: Lazy<HashMap<&str, &str>> = Lazy::new(|| {
@@ -531,55 +533,6 @@ pub fn receive_samples_loop(
     Ok(())
 }
 
-struct StreamingSource {
-    sample_buffer: Arc<Mutex<VecDeque<f32>>>,
-    current_batch: Vec<f32>,
-    current_batch_cursor: usize,
-    channels_count: usize,
-    sample_rate: u32,
-    batch_frames_count: usize,
-}
-
-impl Source for StreamingSource {
-    fn current_frame_len(&self) -> Option<usize> {
-        None
-    }
-
-    fn channels(&self) -> u16 {
-        self.channels_count as _
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
-    }
-
-    fn total_duration(&self) -> Option<std::time::Duration> {
-        None
-    }
-}
-
-impl Iterator for StreamingSource {
-    type Item = f32;
-
-    #[inline]
-    fn next(&mut self) -> Option<f32> {
-        if self.current_batch_cursor == 0 {
-            self.current_batch = get_next_frame_batch(
-                &mut self.sample_buffer.lock(),
-                self.channels_count,
-                self.batch_frames_count,
-            );
-        }
-
-        let sample = self.current_batch[self.current_batch_cursor];
-
-        self.current_batch_cursor =
-            (self.current_batch_cursor + 1) % (self.batch_frames_count * self.channels_count);
-
-        Some(sample)
-    }
-}
-
 pub fn play_audio_loop(
     is_running: impl Fn() -> bool,
     device: &AudioDevice,
@@ -597,26 +550,88 @@ pub fn play_audio_loop(
 
     let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
 
-    let (_stream, handle) = OutputStream::try_from_device(&device.inner)?;
+    let stream_config = StreamConfig {
+        channels: channels_count,
+        sample_rate: cpal::SampleRate(sample_rate),
+        buffer_size: BufferSize::Default,
+    };
 
-    handle.play_raw(StreamingSource {
-        sample_buffer: Arc::clone(&sample_buffer),
-        current_batch: vec![],
-        current_batch_cursor: 0,
-        channels_count: channels_count as _,
-        sample_rate,
-        batch_frames_count,
-    })?;
+    let error = Arc::new(Mutex::new(None::<anyhow::Error>));
 
-    receive_samples_loop(
-        is_running,
-        receiver,
-        sample_buffer,
-        channels_count as _,
-        batch_frames_count,
-        average_buffer_frames_count,
-    )
-    .ok();
+    // Heartbeat: the data callback sets this to true on each invocation.
+    // The receive loop periodically checks if the callback is still being called.
+    // On visionOS, CoreAudio may silently stop calling the callback when the audio
+    // session is interrupted (e.g. Digital Crown dismiss) without firing an error.
+    let callback_alive = Arc::new(AtomicBool::new(true));
 
-    Ok(())
+    let stream = device.inner.build_output_stream(
+        &stream_config,
+        {
+            let sample_buffer = Arc::clone(&sample_buffer);
+            let callback_alive = Arc::clone(&callback_alive);
+            move |output: &mut [f32], _| {
+                callback_alive.store(true, Ordering::Relaxed);
+                let frames_count = output.len() / channels_count as usize;
+                let samples = get_next_frame_batch(
+                    &mut sample_buffer.lock(),
+                    channels_count as usize,
+                    frames_count,
+                );
+                output.copy_from_slice(&samples);
+            }
+        },
+        {
+            let error = Arc::clone(&error);
+            move |e| {
+                warn!("Audio output error: {e}");
+                *error.lock() = Some(e.into());
+            }
+        },
+        None,
+    )?;
+
+    let mut res = stream.play().to_any();
+
+    if res.is_ok() {
+        // Check both error callback and data callback heartbeat.
+        // The heartbeat detects silent CoreAudio death where the error callback
+        // never fires but the data callback stops being invoked.
+        let last_heartbeat_check = Mutex::new(Instant::now());
+
+        receive_samples_loop(
+            || {
+                if !is_running() {
+                    return false;
+                }
+                if error.lock().is_some() {
+                    return false;
+                }
+                // Check heartbeat every 2 seconds: if the data callback hasn't
+                // fired since we last checked, CoreAudio has silently stopped.
+                let mut last_check = last_heartbeat_check.lock();
+                let now = Instant::now();
+                if now.duration_since(*last_check) >= Duration::from_secs(2) {
+                    if callback_alive.swap(false, Ordering::Relaxed) {
+                        *last_check = now;
+                    } else {
+                        warn!("Audio output inactive, restarting");
+                        return false;
+                    }
+                }
+                true
+            },
+            receiver,
+            sample_buffer,
+            channels_count as _,
+            batch_frames_count,
+            average_buffer_frames_count,
+        )
+        .ok();
+
+        if let Some(e) = error.lock().take() {
+            res = Err(e);
+        }
+    }
+
+    res
 }
