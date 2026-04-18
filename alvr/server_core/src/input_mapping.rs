@@ -384,6 +384,19 @@ pub fn automatic_bindings(
             config,
         ));
     }
+    if (s_set.contains(&*LEFT_SQUEEZE_SENSOR_VALUE_ID))
+        && (d_set.contains(&*LEFT_SQUEEZE_SENSOR_VALUE_ID))
+    {
+        bindings.extend(map_button_pair_automatic(
+            value(
+                *LEFT_SQUEEZE_SENSOR_VALUE_ID
+            ),
+            value(
+                *LEFT_SQUEEZE_SENSOR_VALUE_ID
+            ),
+            config,
+        ));
+    }
     if (s_set.contains(&*RIGHT_SQUEEZE_CLICK_ID) || s_set.contains(&*RIGHT_SQUEEZE_VALUE_ID))
         && (d_set.contains(&*RIGHT_SQUEEZE_CLICK_ID) || d_set.contains(&*RIGHT_SQUEEZE_VALUE_ID))
     {
@@ -405,7 +418,19 @@ pub fn automatic_bindings(
             config,
         ));
     }
-
+    if (s_set.contains(&*RIGHT_SQUEEZE_SENSOR_VALUE_ID))
+        && (d_set.contains(&*RIGHT_SQUEEZE_SENSOR_VALUE_ID))
+    {
+        bindings.extend(map_button_pair_automatic(
+            value(
+                *RIGHT_SQUEEZE_SENSOR_VALUE_ID
+            ),
+            value(
+                *RIGHT_SQUEEZE_SENSOR_VALUE_ID
+            ),
+            config,
+        ));
+    }
     // Trigger buttons
     if (s_set.contains(&*LEFT_TRIGGER_CLICK_ID) || s_set.contains(&*LEFT_TRIGGER_VALUE_ID))
         && (d_set.contains(&*LEFT_TRIGGER_CLICK_ID) || d_set.contains(&*LEFT_TRIGGER_VALUE_ID))
@@ -422,6 +447,19 @@ pub fn automatic_bindings(
                 *LEFT_TRIGGER_CLICK_ID,
                 *LEFT_TRIGGER_TOUCH_ID,
                 *LEFT_TRIGGER_VALUE_ID,
+            ),
+            config,
+        ));
+    }
+    if (s_set.contains(&*LEFT_TRIGGER_SENSOR_VALUE_ID))
+        && (d_set.contains(&*LEFT_TRIGGER_SENSOR_VALUE_ID))
+    {
+        bindings.extend(map_button_pair_automatic(
+            value(
+                *LEFT_TRIGGER_SENSOR_VALUE_ID
+            ),
+            value(
+                *LEFT_TRIGGER_SENSOR_VALUE_ID
             ),
             config,
         ));
@@ -445,7 +483,19 @@ pub fn automatic_bindings(
             config,
         ));
     }
-
+    if (s_set.contains(&*RIGHT_TRIGGER_SENSOR_VALUE_ID))
+        && (d_set.contains(&*RIGHT_TRIGGER_SENSOR_VALUE_ID))
+    {
+        bindings.extend(map_button_pair_automatic(
+            value(
+                *RIGHT_TRIGGER_SENSOR_VALUE_ID
+            ),
+            value(
+                *RIGHT_TRIGGER_SENSOR_VALUE_ID
+            ),
+            config,
+        ));
+    }
     // Thumbsticks
     if s_set.contains(&*LEFT_THUMBSTICK_X_ID) {
         let x = value(*LEFT_THUMBSTICK_X_ID);
